@@ -113,6 +113,7 @@ set(BOX2D_SAMPLE_FILES
     sample_joints.cpp
     sample_robustness.cpp
     sample_shapes.cpp
+    sample_skiing.cpp
     sample_stacking.cpp
     sample_world.cpp
     shader.c

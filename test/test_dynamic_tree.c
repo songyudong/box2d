@@ -43,7 +43,7 @@ static int TreeRayCastTest( void )
 	b2DynamicTree tree = b2DynamicTree_Create();
 	int proxyId = b2DynamicTree_CreateProxy( &tree, a, 1, 0 );
 
-	b2RayCastInput input = {};
+	b2RayCastInput input = { 0 };
 	input.maxFraction = 1.0f;
 
 	// Test 1: Ray hits AABB from left side

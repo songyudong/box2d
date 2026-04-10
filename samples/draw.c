@@ -1305,7 +1305,7 @@ void DestroyPolygons( Polygons* render )
 
 void AddPolygon( Polygons* render, b2Transform transform, const b2Vec2* points, int count, float radius, b2HexColor color )
 {
-	Polygon data = {};
+	Polygon data = { 0 };
 	data.transform = transform;
 
 	int n = count < 8 ? count : 8;
