@@ -39,6 +39,7 @@ struct SampleContext
 	bool enableSleep = true;
 	bool showUI = true;
 	bool frameTime = false;
+	float averageFps = 0.0f;
 
 	// These are persisted
 	int sampleIndex = 0;

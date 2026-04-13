@@ -30,6 +30,13 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <string>
+
+#if defined( _WIN32 )
+#include <Windows.h>
+#include <dshow.h>
+#pragma comment( lib, "strmiids.lib" )
+#endif
 
 #ifdef BOX2D_PROFILE
 #include <tracy/Tracy.hpp>
@@ -59,6 +66,121 @@ static Sample* s_sample = nullptr;
 static bool s_rightMouseDown = false;
 static b2Vec2 s_clickPointWS = b2Vec2_zero;
 static float s_framebufferScale = 1.0f;
+static float s_averageFps = 0.0f;
+static int s_fpsFrameCount = 0;
+static double s_fpsAccumulatedTime = 0.0;
+
+#if defined( _WIN32 )
+static IGraphBuilder* s_musicGraph = nullptr;
+static IMediaControl* s_mediaControl = nullptr;
+static IMediaSeeking* s_mediaSeeking = nullptr;
+static IMediaEventEx* s_mediaEvent = nullptr;
+
+static void StopBackgroundMusic();
+
+static bool TryOpenAndPlayMusic( const wchar_t* path )
+{
+	HRESULT hr = CoCreateInstance( CLSID_FilterGraph, nullptr, CLSCTX_INPROC_SERVER, IID_IGraphBuilder,
+		reinterpret_cast<void**>( &s_musicGraph ) );
+	if ( FAILED( hr ) )
+	{
+		return false;
+	}
+
+	hr = s_musicGraph->QueryInterface( IID_IMediaControl, reinterpret_cast<void**>( &s_mediaControl ) );
+	hr = SUCCEEDED( hr ) ? s_musicGraph->QueryInterface( IID_IMediaSeeking, reinterpret_cast<void**>( &s_mediaSeeking ) ) : hr;
+	hr = SUCCEEDED( hr ) ? s_musicGraph->QueryInterface( IID_IMediaEventEx, reinterpret_cast<void**>( &s_mediaEvent ) ) : hr;
+	hr = SUCCEEDED( hr ) ? s_musicGraph->RenderFile( path, nullptr ) : hr;
+	if ( FAILED( hr ) )
+	{
+		StopBackgroundMusic();
+		return false;
+	}
+
+	hr = s_mediaControl->Run();
+	if ( FAILED( hr ) )
+	{
+		StopBackgroundMusic();
+		return false;
+	}
+
+	wprintf( L"Background music: %ls\n", path );
+	return true;
+}
+
+static bool StartBackgroundMusic()
+{
+	const wchar_t* candidates[] = {		
+		L"samples/data/bg.wav",
+		L"../../samples/data/bg.wav",
+	};
+
+	for ( const wchar_t* path : candidates )
+	{
+		if ( TryOpenAndPlayMusic( path ) )
+		{
+			return true;
+		}
+	}
+
+	printf( "Background music failed to start. Tried: data/bg.mp3, ../samples/data/bg.mp3, samples/data/bg.mp3, ../../samples/data/bg.mp3\n" );
+	return false;
+}
+
+static void PumpBackgroundMusicLoop()
+{
+	if ( s_mediaEvent == nullptr || s_mediaSeeking == nullptr || s_mediaControl == nullptr )
+	{
+		return;
+	}
+
+	long eventCode = 0;
+	LONG_PTR param1 = 0;
+	LONG_PTR param2 = 0;
+	while ( SUCCEEDED( s_mediaEvent->GetEvent( &eventCode, &param1, &param2, 0 ) ) )
+	{
+		s_mediaEvent->FreeEventParams( eventCode, param1, param2 );
+		if ( eventCode == EC_COMPLETE )
+		{
+			LONGLONG start = 0;
+			s_mediaSeeking->SetPositions( &start, AM_SEEKING_AbsolutePositioning, nullptr, AM_SEEKING_NoPositioning );
+			s_mediaControl->Run();
+		}
+	}
+	}
+
+static void StopBackgroundMusic()
+{
+	if ( s_mediaControl != nullptr )
+	{
+		s_mediaControl->Stop();
+	}
+
+	if ( s_mediaEvent != nullptr )
+	{
+		s_mediaEvent->Release();
+		s_mediaEvent = nullptr;
+	}
+
+	if ( s_mediaSeeking != nullptr )
+	{
+		s_mediaSeeking->Release();
+		s_mediaSeeking = nullptr;
+	}
+
+	if ( s_mediaControl != nullptr )
+	{
+		s_mediaControl->Release();
+		s_mediaControl = nullptr;
+	}
+
+	if ( s_musicGraph != nullptr )
+	{
+		s_musicGraph->Release();
+		s_musicGraph = nullptr;
+	}
+}
+#endif
 
 inline bool IsPowerOfTwo( int32_t x )
 {
@@ -663,6 +785,11 @@ int main( int, char** )
 	CreateUI( s_context.window, glslVersion );
 	s_context.draw = CreateDraw();
 
+#if defined( _WIN32 )
+	CoInitializeEx( nullptr, COINIT_APARTMENTTHREADED );
+	StartBackgroundMusic();
+#endif
+
 	s_context.sampleIndex = b2ClampInt( s_context.sampleIndex, 0, g_sampleCount - 1 );
 	s_selection = s_context.sampleIndex;
 
@@ -672,6 +799,10 @@ int main( int, char** )
 
 	while ( !glfwWindowShouldClose( s_context.window ) )
 	{
+	#if defined( _WIN32 )
+		PumpBackgroundMusicLoop();
+	#endif
+
 		double time1 = glfwGetTime();
 
 		if ( glfwGetKey( s_context.window, GLFW_KEY_Z ) == GLFW_PRESS )
@@ -768,12 +899,26 @@ int main( int, char** )
 		}
 
 		frameTime = float( time2 - time1 );
+		s_fpsAccumulatedTime += frameTime;
+		s_fpsFrameCount += 1;
+		if ( s_fpsAccumulatedTime >= 1.0 )
+		{
+			s_averageFps = s_fpsFrameCount > 0 ? float( s_fpsFrameCount / s_fpsAccumulatedTime ) : 0.0f;
+			s_fpsAccumulatedTime = 0.0;
+			s_fpsFrameCount = 0;
+		}
+		s_context.averageFps = s_averageFps;
 	}
 
 	delete s_sample;
 	s_sample = nullptr;
 
 	DestroyDraw( s_context.draw );
+
+#if defined( _WIN32 )
+	StopBackgroundMusic();
+	CoUninitialize();
+#endif
 
 	DestroyUI();
 	glfwTerminate();
